@@ -955,6 +955,32 @@ enum CommandBarFeatureTests {
                 .map { abs($0.value - 150) < 0.001 } == true,
                "a comma decimal converts where that is the custom")
 
+        for (decimal, grouping, inputs) in [
+            (".", ",", [("1.5", 150.0), ("1,5", 150.0), ("-1,5", -150.0),
+                         ("1,500", 150_000.0), ("-123,456", -12_345_600.0),
+                         ("1,234.5", 123_450.0), ("1.234,5", 123_450.0),
+                         ("1,234,567", 123_456_700.0)]),
+            (",", ".", [("1,5", 150.0), ("1.5", 150.0), ("-1.5", -150.0),
+                         ("1.500", 150_000.0), ("-123.456", -12_345_600.0),
+                         ("1.234,5", 123_450.0), ("1,234.5", 123_450.0),
+                         ("1.234.567", 123_456_700.0)]),
+        ] {
+            for (number, expected) in inputs {
+                let converted = CommandBarUnits.convert("\(number) m to cm",
+                                                       decimalSeparator: decimal,
+                                                       groupingSeparator: grouping,
+                                                       locale: Locale(identifier: "en_US"))
+                suite.expect(converted.map { abs($0.value - expected) < 0.001 } == true,
+                             "unit conversion reads \(number) with decimal \(decimal) as \(expected) cm")
+            }
+            for number in ["1,,5", "1..5", "--1", "1-5"] {
+                suite.expect(CommandBarUnits.convert("\(number) m to cm",
+                                                     decimalSeparator: decimal,
+                                                     groupingSeparator: grouping) == nil,
+                             "unit conversion refuses malformed number \(number)")
+            }
+        }
+
         // MeasurementFormatter words the unit from the localization data of the
         // macOS it runs on, not from the locale it is handed, so pinning
         // "5 ft 10.87 in" here failed on macOS 15.x with nothing changed

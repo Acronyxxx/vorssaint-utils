@@ -156,16 +156,33 @@ enum CommandBarUnits {
         return (value, unit)
     }
 
-    /// Reads the number with the separators of this Mac, the same way the
-    /// calculator does.
+    /// Like the calculator, accepts an alternate decimal separator unless it
+    /// forms grouped thousands. When both separators occur, the last is decimal.
     private static func number(_ token: String,
                                decimalSeparator: String,
                                groupingSeparator: String) -> Double? {
         var normalized = token
-        if decimalSeparator != groupingSeparator {
-            normalized = normalized.replacingOccurrences(of: groupingSeparator, with: "")
+        let hasDecimal = token.contains(decimalSeparator)
+        let hasGrouping = decimalSeparator != groupingSeparator && token.contains(groupingSeparator)
+        if hasDecimal, hasGrouping {
+            let decimalRange = token.range(of: decimalSeparator, options: .backwards)
+            let groupingRange = token.range(of: groupingSeparator, options: .backwards)
+            if let decimalRange, let groupingRange, groupingRange.lowerBound > decimalRange.lowerBound {
+                normalized = token.replacingOccurrences(of: decimalSeparator, with: "")
+                    .replacingOccurrences(of: groupingSeparator, with: ".")
+            } else {
+                normalized = token.replacingOccurrences(of: groupingSeparator, with: "")
+                    .replacingOccurrences(of: decimalSeparator, with: ".")
+            }
+        } else if hasGrouping {
+            let unsigned = token.hasPrefix("-") ? String(token.dropFirst()) : token
+            let groups = unsigned.components(separatedBy: groupingSeparator)
+            let isGrouping = groups.count >= 2 && (1...3).contains(groups[0].count)
+                && groups.dropFirst().allSatisfy { $0.count == 3 }
+            normalized = token.replacingOccurrences(of: groupingSeparator, with: isGrouping ? "" : ".")
+        } else if hasDecimal {
+            normalized = token.replacingOccurrences(of: decimalSeparator, with: ".")
         }
-        normalized = normalized.replacingOccurrences(of: decimalSeparator, with: ".")
         guard !normalized.isEmpty, normalized.filter({ $0 == "." }).count <= 1,
               normalized.allSatisfy({ $0.isNumber || $0 == "." || $0 == "-" })
         else { return nil }
