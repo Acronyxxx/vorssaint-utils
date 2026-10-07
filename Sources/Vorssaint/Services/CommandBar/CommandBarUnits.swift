@@ -158,28 +158,36 @@ enum CommandBarUnits {
 
     /// Like the calculator, accepts an alternate decimal separator unless it
     /// forms grouped thousands. When both separators occur, the last is decimal.
+    /// The tokenizer never keeps a space or an apostrophe inside a number, so
+    /// where thousands are grouped with one of those the alternate is whichever
+    /// of "." and "," is not the decimal, as in the calculator.
     private static func number(_ token: String,
                                decimalSeparator: String,
                                groupingSeparator: String) -> Double? {
+        let groupsWithPunctuation = (groupingSeparator == "." || groupingSeparator == ",")
+            && groupingSeparator != decimalSeparator
+        let alternate = groupsWithPunctuation ? groupingSeparator : (decimalSeparator == "," ? "." : ",")
         var normalized = token
         let hasDecimal = token.contains(decimalSeparator)
-        let hasGrouping = decimalSeparator != groupingSeparator && token.contains(groupingSeparator)
-        if hasDecimal, hasGrouping {
+        let hasAlternate = token.contains(alternate)
+        if hasDecimal, hasAlternate {
             let decimalRange = token.range(of: decimalSeparator, options: .backwards)
-            let groupingRange = token.range(of: groupingSeparator, options: .backwards)
-            if let decimalRange, let groupingRange, groupingRange.lowerBound > decimalRange.lowerBound {
+            let alternateRange = token.range(of: alternate, options: .backwards)
+            if let decimalRange, let alternateRange, alternateRange.lowerBound > decimalRange.lowerBound {
                 normalized = token.replacingOccurrences(of: decimalSeparator, with: "")
-                    .replacingOccurrences(of: groupingSeparator, with: ".")
+                    .replacingOccurrences(of: alternate, with: ".")
             } else {
-                normalized = token.replacingOccurrences(of: groupingSeparator, with: "")
+                normalized = token.replacingOccurrences(of: alternate, with: "")
                     .replacingOccurrences(of: decimalSeparator, with: ".")
             }
-        } else if hasGrouping {
+        } else if hasAlternate {
+            // No grouped number opens with a 0 group, so "0,250" is a decimal.
             let unsigned = token.hasPrefix("-") ? String(token.dropFirst()) : token
-            let groups = unsigned.components(separatedBy: groupingSeparator)
+            let groups = unsigned.components(separatedBy: alternate)
             let isGrouping = groups.count >= 2 && (1...3).contains(groups[0].count)
+                && !groups[0].hasPrefix("0")
                 && groups.dropFirst().allSatisfy { $0.count == 3 }
-            normalized = token.replacingOccurrences(of: groupingSeparator, with: isGrouping ? "" : ".")
+            normalized = token.replacingOccurrences(of: alternate, with: isGrouping ? "" : ".")
         } else if hasDecimal {
             normalized = token.replacingOccurrences(of: decimalSeparator, with: ".")
         }
