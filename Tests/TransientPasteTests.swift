@@ -32,9 +32,23 @@ enum TransientPasteTests {
     /// The test lane uses main so the run-loop assertions share its type cache.
     final class GeneralPasteboardAccess {
         static let shared = GeneralPasteboardAccess()
+        var completions = 0
         func async(_ work: @escaping () -> Void) { DispatchQueue.main.async(execute: work) }
         func async<T>(_ work: @escaping () -> T, then completion: @escaping (T) -> Void) {
-            DispatchQueue.main.async { completion(work()) }
+            DispatchQueue.main.async {
+                let value = work()
+                self.completions += 1
+                completion(value)
+            }
+        }
+    }
+
+    final class PromisedImage: NSObject, NSPasteboardItemDataProvider {
+        var reads = 0
+        func pasteboard(_ pasteboard: NSPasteboard?, item: NSPasteboardItem,
+                        provideDataForType type: NSPasteboard.PasteboardType) {
+            reads += 1
+            item.setData(Data([1, 2, 3]), forType: type)
         }
     }
 
@@ -114,5 +128,42 @@ enum TransientPasteTests {
         suite.expect(CGEvent.inserted == ["requested"] && failed == 0
                      && pasteboard.string(forType: .string) == "copy after paste",
                      "a copy after delivery is preserved by the existing restore guard")
+
+        reset()
+        let provider = PromisedImage()
+        let item = NSPasteboardItem()
+        item.setDataProvider(provider, forTypes: [.png])
+        pasteboard.clearContents()
+        pasteboard.writeObjects([item])
+        let originalCount = pasteboard.changeCount
+        before = 0; posted = 0; failed = 0
+        suite.expect(host.pasteCurrentContents(willPostShortcut: { before += 1 },
+                                               didPostShortcut: { posted += 1 },
+                                               didFail: { failed += 1 }),
+                     "promised media can use the shared paste path")
+        CGEventSource.held = []
+        pump { posted + failed == 1 }
+        suite.expect(before == 1 && posted == 1 && failed == 0 && CGEvent.keyUps == 1,
+                     "unchanged media forwards a balanced paste without conversion")
+        suite.expect(provider.reads == 0 && pasteboard.changeCount == originalCount,
+                     "media forwarding neither reads promised bytes nor changes the pasteboard")
+
+        reset()
+        before = 0; posted = 0; failed = 0
+        let captures = GeneralPasteboardAccess.shared.completions
+        suite.expect(host.pasteCurrentContents(willPostShortcut: { before += 1 },
+                                               didPostShortcut: { posted += 1 },
+                                               didFail: { failed += 1 }),
+                     "forwarding releases admission after completion")
+        pump { GeneralPasteboardAccess.shared.completions > captures }
+        pasteboard.clearContents()
+        pasteboard.setString("new media copy", forType: .string)
+        CGEventSource.held = []
+        pump { posted + failed == 1 }
+        suite.expect(before == 0 && posted == 0 && failed == 1
+                     && CGEvent.inserted.isEmpty && CGEvent.keyUps == 0,
+                     "a copy during forwarding cancels before callbacks or synthetic keys")
+        suite.expect(pasteboard.string(forType: .string) == "new media copy",
+                     "cancelled forwarding preserves the newer clipboard")
     }
 }
